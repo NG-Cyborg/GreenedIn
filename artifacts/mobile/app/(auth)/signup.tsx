@@ -42,7 +42,7 @@ export default function SignUp() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { language, setUser } = useApp();
+  const { language, setUser, registerCredentials } = useApp();
 
   const [firstName, setFirstName] = useState("");
   const [surname, setSurname] = useState("");
@@ -54,23 +54,31 @@ export default function SignUp() {
   const [showPass, setShowPass] = useState(false);
   const [showCodePicker, setShowCodePicker] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const isValid = firstName && surname && phone && password;
+  const isValid = firstName && surname && phone && password && password.length >= 6;
 
   const handleCreate = async () => {
     if (!isValid) return;
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+    setError("");
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    await setUser({
-      id: Date.now().toString(),
+    const userId = Date.now().toString() + Math.random().toString(36).substr(2, 5);
+    const newUser = {
+      id: userId,
       firstName: firstName.trim(),
       surname: surname.trim(),
       phone,
       countryCode,
       email: email.trim() || undefined,
       role,
-    });
-    router.replace("/(tabs)/");
+    };
+    await setUser(newUser);
+    await registerCredentials(phone, countryCode, password, userId);
+    router.replace("/(tabs)");
     setLoading(false);
   };
 
@@ -141,7 +149,7 @@ export default function SignUp() {
             <View style={[styles.phoneRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
               <TouchableOpacity
                 style={styles.countryCode}
-                onPress={() => setShowCodePicker(true)}
+                onPress={() => setShowCodePicker((v) => !v)}
               >
                 <Text style={[styles.countryCodeText, { color: colors.foreground }]}>
                   {countryCode}
@@ -202,7 +210,7 @@ export default function SignUp() {
                 style={[styles.passInput, { color: colors.foreground }]}
                 value={password}
                 onChangeText={setPassword}
-                placeholder="Create a password"
+                placeholder="At least 6 characters"
                 placeholderTextColor={colors.mutedForeground}
                 secureTextEntry={!showPass}
                 returnKeyType="done"
@@ -211,6 +219,9 @@ export default function SignUp() {
                 <Feather name={showPass ? "eye-off" : "eye"} size={18} color={colors.mutedForeground} />
               </TouchableOpacity>
             </View>
+            <Text style={[styles.hint, { color: colors.mutedForeground }]}>
+              Minimum 6 characters
+            </Text>
           </View>
 
           <View style={styles.field}>
@@ -243,6 +254,13 @@ export default function SignUp() {
               ))}
             </View>
           </View>
+
+          {error ? (
+            <View style={[styles.errorBox, { backgroundColor: "#FFF0F0", borderColor: "#FFCCCC" }]}>
+              <Feather name="alert-circle" size={14} color="#E53935" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
 
           <TouchableOpacity
             style={[
@@ -309,6 +327,11 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontFamily: "Geist_500Medium",
+  },
+  hint: {
+    fontSize: 11,
+    fontFamily: "Geist_400Regular",
+    marginTop: 2,
   },
   input: {
     borderWidth: 1,
@@ -389,6 +412,20 @@ const styles = StyleSheet.create({
   roleBtnText: {
     fontSize: 13,
     fontFamily: "Geist_500Medium",
+  },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  errorText: {
+    color: "#E53935",
+    fontSize: 13,
+    fontFamily: "Geist_400Regular",
+    flex: 1,
   },
   submitBtn: {
     borderRadius: 14,

@@ -23,6 +23,9 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppProvider } from "@/context/AppContext";
 import { EnterpriseProvider } from "@/context/EnterpriseContext";
+import { CourseProgressProvider } from "@/context/CourseProgressContext";
+import { CommunityProvider } from "@/context/CommunityContext";
+import { MarketplaceProvider } from "@/context/MarketplaceContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -41,8 +44,40 @@ function RootLayoutNav() {
         options={{ animation: "slide_from_right" }}
       />
       <Stack.Screen
+        name="course/[id]"
+        options={{ animation: "slide_from_right" }}
+      />
+      <Stack.Screen
         name="chat"
         options={{ animation: "slide_from_bottom" }}
+      />
+      <Stack.Screen
+        name="profile/edit"
+        options={{ animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="profile/change-password"
+        options={{ animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="profile/privacy"
+        options={{ animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="profile/security"
+        options={{ animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="profile/about"
+        options={{ animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="profile/notifications"
+        options={{ animation: "slide_from_right" }}
+      />
+      <Stack.Screen
+        name="profile/help"
+        options={{ animation: "slide_from_right" }}
       />
     </Stack>
   );
@@ -75,11 +110,17 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <AppProvider>
             <EnterpriseProvider>
-              <GestureHandlerRootView style={{ flex: 1 }}>
-                <KeyboardProvider>
-                  <RootLayoutNav />
-                </KeyboardProvider>
-              </GestureHandlerRootView>
+              <CourseProgressProvider>
+                <CommunityProvider>
+                  <MarketplaceProvider>
+                    <GestureHandlerRootView style={{ flex: 1 }}>
+                      <KeyboardProvider>
+                        <RootLayoutNav />
+                      </KeyboardProvider>
+                    </GestureHandlerRootView>
+                  </MarketplaceProvider>
+                </CommunityProvider>
+              </CourseProgressProvider>
             </EnterpriseProvider>
           </AppProvider>
         </QueryClientProvider>

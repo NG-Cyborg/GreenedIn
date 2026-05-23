@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useApp } from "@/context/AppContext";
 import { t } from "@/constants/i18n";
@@ -32,27 +33,40 @@ export default function SignIn() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { language, setUser } = useApp();
+  const { language, setUser, validateCredentials } = useApp();
 
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [countryCode, setCountryCode] = useState("+234");
   const [showPass, setShowPass] = useState(false);
+  const [showCodePicker, setShowCodePicker] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSignIn = async () => {
     if (!phone || !password) return;
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    await setUser({
-      id: Date.now().toString(),
-      firstName: "Farmer",
-      surname: "User",
-      phone,
-      countryCode,
-      role: "farmer",
-    });
-    router.replace("/(tabs)/");
+    setError("");
+
+    const userId = await validateCredentials(phone, countryCode, password);
+    if (!userId) {
+      setError("Incorrect phone number or password. Please try again.");
+      setLoading(false);
+      return;
+    }
+
+    const storedUser = await AsyncStorage.getItem("@greenedin_user");
+    if (storedUser) {
+      const parsed = JSON.parse(storedUser);
+      if (parsed.id === userId) {
+        await setUser(parsed);
+        router.replace("/(tabs)");
+        setLoading(false);
+        return;
+      }
+    }
+
+    setError("Account not found. Please sign up first.");
     setLoading(false);
   };
 
@@ -91,7 +105,10 @@ export default function SignIn() {
               {t(language, "phoneNumber")}
             </Text>
             <View style={[styles.phoneRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <TouchableOpacity style={styles.countryCode}>
+              <TouchableOpacity
+                style={styles.countryCode}
+                onPress={() => setShowCodePicker((v) => !v)}
+              >
                 <Text style={[styles.countryCodeText, { color: colors.foreground }]}>
                   {countryCode}
                 </Text>
@@ -109,6 +126,22 @@ export default function SignIn() {
               />
             </View>
           </View>
+
+          {showCodePicker && (
+            <View style={[styles.codePicker, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              {COUNTRY_CODES.map((c) => (
+                <TouchableOpacity
+                  key={c.code}
+                  style={styles.codeItem}
+                  onPress={() => { setCountryCode(c.code); setShowCodePicker(false); }}
+                >
+                  <Text style={[styles.codeText, { color: colors.foreground }]}>
+                    {c.code} — {c.country}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           <View style={styles.field}>
             <Text style={[styles.label, { color: colors.foreground }]}>
@@ -130,6 +163,13 @@ export default function SignIn() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {error ? (
+            <View style={[styles.errorBox, { backgroundColor: "#FFF0F0", borderColor: "#FFCCCC" }]}>
+              <Feather name="alert-circle" size={14} color="#E53935" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
 
           <TouchableOpacity
             style={[
@@ -222,6 +262,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: "Geist_400Regular",
   },
+  codePicker: {
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  codeItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  codeText: {
+    fontSize: 14,
+    fontFamily: "Geist_400Regular",
+  },
   passRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -238,6 +291,20 @@ const styles = StyleSheet.create({
   },
   eyeBtn: {
     paddingHorizontal: 14,
+  },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+  },
+  errorText: {
+    color: "#E53935",
+    fontSize: 13,
+    fontFamily: "Geist_400Regular",
+    flex: 1,
   },
   submitBtn: {
     borderRadius: 14,

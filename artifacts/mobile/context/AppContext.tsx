@@ -21,6 +21,11 @@ export type User = {
   role: UserRole;
 };
 
+type StoredCredential = {
+  userId: string;
+  passwordHash: string;
+};
+
 type AppContextType = {
   user: User | null;
   hasOnboarded: boolean;
@@ -30,6 +35,10 @@ type AppContextType = {
   setHasOnboarded: (value: boolean) => Promise<void>;
   setLanguage: (lang: Language) => Promise<void>;
   signOut: () => Promise<void>;
+  registerCredentials: (phone: string, countryCode: string, password: string, userId: string) => Promise<void>;
+  validateCredentials: (phone: string, countryCode: string, password: string) => Promise<string | null>;
+  updateUser: (updated: Partial<User>) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
 };
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -38,7 +47,22 @@ const STORAGE_KEYS = {
   USER: "@greenedin_user",
   ONBOARDED: "@greenedin_onboarded",
   LANGUAGE: "@greenedin_language",
+  CREDENTIALS: "@greenedin_credentials",
 };
+
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash = hash & hash;
+  }
+  return hash.toString(36);
+}
+
+function credentialKey(phone: string, countryCode: string): string {
+  return `${countryCode}${phone}`;
+}
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
@@ -106,6 +130,60 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.removeItem(STORAGE_KEYS.USER);
   }, []);
 
+  const registerCredentials = useCallback(
+    async (phone: string, countryCode: string, password: string, userId: string) => {
+      const raw = await AsyncStorage.getItem(STORAGE_KEYS.CREDENTIALS);
+      const credentials: Record<string, StoredCredential> = raw ? JSON.parse(raw) : {};
+      const key = credentialKey(phone, countryCode);
+      credentials[key] = { userId, passwordHash: simpleHash(password) };
+      await AsyncStorage.setItem(STORAGE_KEYS.CREDENTIALS, JSON.stringify(credentials));
+    },
+    []
+  );
+
+  const validateCredentials = useCallback(
+    async (phone: string, countryCode: string, password: string): Promise<string | null> => {
+      const raw = await AsyncStorage.getItem(STORAGE_KEYS.CREDENTIALS);
+      if (!raw) return null;
+      const credentials: Record<string, StoredCredential> = JSON.parse(raw);
+      const key = credentialKey(phone, countryCode);
+      const stored = credentials[key];
+      if (!stored) return null;
+      if (stored.passwordHash !== simpleHash(password)) return null;
+      return stored.userId;
+    },
+    []
+  );
+
+  const updateUser = useCallback(
+    async (updated: Partial<User>) => {
+      if (!user) return;
+      const newUser = { ...user, ...updated };
+      setUserState(newUser);
+      await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(newUser));
+    },
+    [user]
+  );
+
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+      if (!user) return { success: false, error: "Not logged in" };
+      const raw = await AsyncStorage.getItem(STORAGE_KEYS.CREDENTIALS);
+      if (!raw) return { success: false, error: "No credentials found" };
+      const credentials: Record<string, StoredCredential> = JSON.parse(raw);
+      const key = credentialKey(user.phone, user.countryCode);
+      const stored = credentials[key];
+      if (!stored) return { success: false, error: "No credentials found" };
+      if (stored.passwordHash !== simpleHash(currentPassword)) {
+        return { success: false, error: "Current password is incorrect" };
+      }
+      credentials[key] = { ...stored, passwordHash: simpleHash(newPassword) };
+      await AsyncStorage.setItem(STORAGE_KEYS.CREDENTIALS, JSON.stringify(credentials));
+      return { success: true };
+    },
+    [user]
+  );
+
   if (!loaded) return null;
 
   return (
@@ -119,6 +197,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setHasOnboarded,
         setLanguage,
         signOut,
+        registerCredentials,
+        validateCredentials,
+        updateUser,
+        changePassword,
       }}
     >
       {children}
