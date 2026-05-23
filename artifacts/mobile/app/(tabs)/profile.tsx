@@ -24,17 +24,22 @@ function SettingsRow({
   value,
   onPress,
   danger,
+  last,
 }: {
   icon: string;
   label: string;
   value?: string;
   onPress?: () => void;
   danger?: boolean;
+  last?: boolean;
 }) {
   const colors = useColors();
   return (
     <TouchableOpacity
-      style={[styles.row, { borderBottomColor: colors.border }]}
+      style={[
+        styles.row,
+        { borderBottomColor: colors.border, borderBottomWidth: last ? 0 : StyleSheet.hairlineWidth },
+      ]}
       onPress={onPress}
       activeOpacity={onPress ? 0.7 : 1}
     >
@@ -137,6 +142,12 @@ export default function ProfileScreen() {
               {user ? `${user.countryCode} ${user.phone}` : ""}
             </Text>
           </View>
+          <TouchableOpacity
+            onPress={() => router.push("/profile/edit")}
+            style={[styles.editBtn, { backgroundColor: colors.secondary }]}
+          >
+            <Feather name="edit-2" size={14} color={colors.primary} />
+          </TouchableOpacity>
           <View style={[styles.roleBadge, { backgroundColor: colors.secondary }]}>
             <Text style={[styles.roleText, { color: colors.primary }]}>
               {user ? ROLE_LABELS[user.role] : ""}
@@ -146,7 +157,7 @@ export default function ProfileScreen() {
 
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-            Preferences
+            PREFERENCES
           </Text>
           <View style={styles.languagePicker}>
             <View style={[styles.rowIcon, { backgroundColor: colors.secondary }]}>
@@ -161,31 +172,64 @@ export default function ProfileScreen() {
           <SettingsRow
             icon="bell"
             label={t(language, "notifications")}
-            onPress={() => {}}
+            onPress={() => router.push("/profile/notifications")}
           />
           <SettingsRow
             icon="shield"
             label={t(language, "privacy")}
-            onPress={() => {}}
+            onPress={() => router.push("/profile/privacy")}
+            last
           />
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-            Account
+            ACCOUNT
           </Text>
-          <SettingsRow icon="edit-2" label="Edit Profile" onPress={() => {}} />
-          <SettingsRow icon="lock" label="Change Password" onPress={() => {}} />
-          <SettingsRow icon="credit-card" label="Subscription Plan" value="Free" onPress={() => {}} />
+          <SettingsRow
+            icon="edit-2"
+            label="Edit Profile"
+            onPress={() => router.push("/profile/edit")}
+          />
+          <SettingsRow
+            icon="lock"
+            label="Change Password"
+            onPress={() => router.push("/profile/change-password")}
+          />
+          <SettingsRow
+            icon="shield"
+            label="Privacy & Security"
+            onPress={() => router.push("/profile/security")}
+          />
+          <SettingsRow
+            icon="credit-card"
+            label="Subscription Plan"
+            value="Free"
+            onPress={() => {}}
+            last
+          />
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
-            Support
+            SUPPORT
           </Text>
-          <SettingsRow icon="help-circle" label={t(language, "helpSupport")} onPress={() => {}} />
-          <SettingsRow icon="info" label="About GreenedIn" onPress={() => {}} />
-          <SettingsRow icon="star" label="Rate the App" onPress={() => {}} />
+          <SettingsRow
+            icon="help-circle"
+            label={t(language, "helpSupport")}
+            onPress={() => router.push("/profile/help")}
+          />
+          <SettingsRow
+            icon="info"
+            label="About GreenedIn"
+            onPress={() => router.push("/profile/about")}
+          />
+          <SettingsRow
+            icon="star"
+            label="Rate the App"
+            onPress={() => {}}
+            last
+          />
         </View>
 
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -194,6 +238,7 @@ export default function ProfileScreen() {
             label={t(language, "signOut")}
             onPress={handleSignOut}
             danger
+            last
           />
         </View>
 
@@ -243,6 +288,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   avatarText: {
     fontSize: 22,
@@ -262,6 +308,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: "Geist_400Regular",
   },
+  editBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   roleBadge: {
     borderRadius: 8,
     paddingHorizontal: 10,
@@ -279,7 +332,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 11,
     fontFamily: "Geist_500Medium",
-    textTransform: "uppercase",
     letterSpacing: 0.8,
     paddingHorizontal: 16,
     paddingTop: 12,
@@ -290,7 +342,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 13,
-    borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 12,
   },
   rowIcon: {
