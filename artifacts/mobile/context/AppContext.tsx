@@ -37,6 +37,7 @@ type AppContextType = {
   signOut: () => Promise<void>;
   registerCredentials: (phone: string, countryCode: string, password: string, userId: string) => Promise<void>;
   validateCredentials: (phone: string, countryCode: string, password: string) => Promise<string | null>;
+  getUserById: (userId: string) => Promise<User | null>;
   updateUser: (updated: Partial<User>) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
 };
@@ -45,6 +46,7 @@ const AppContext = createContext<AppContextType | null>(null);
 
 const STORAGE_KEYS = {
   USER: "@greenedin_user",
+  USERS: "@greenedin_users",
   ONBOARDED: "@greenedin_onboarded",
   LANGUAGE: "@greenedin_language",
   CREDENTIALS: "@greenedin_credentials",
@@ -98,7 +100,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .then(() => setIsOffline(false))
         .catch(() => setIsOffline(true));
     };
-
     checkConnectivity();
     const interval = setInterval(checkConnectivity, 30000);
     return () => clearInterval(interval);
@@ -107,7 +108,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setUser = useCallback(async (newUser: User | null) => {
     setUserState(newUser);
     if (newUser) {
+      // Write to session key
       await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(newUser));
+      // Also persist to users registry so we can look up after sign-out
+      const raw = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
+      const registry: Record<string, User> = raw ? JSON.parse(raw) : {};
+      registry[newUser.id] = newUser;
+      await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(registry));
     } else {
       await AsyncStorage.removeItem(STORAGE_KEYS.USER);
     }
@@ -127,6 +134,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     setUserState(null);
+    // Only remove the session key — keep the users registry and credentials intact
     await AsyncStorage.removeItem(STORAGE_KEYS.USER);
   }, []);
 
@@ -155,12 +163,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const getUserById = useCallback(async (userId: string): Promise<User | null> => {
+    const raw = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
+    if (!raw) return null;
+    const registry: Record<string, User> = JSON.parse(raw);
+    return registry[userId] ?? null;
+  }, []);
+
   const updateUser = useCallback(
     async (updated: Partial<User>) => {
       if (!user) return;
       const newUser = { ...user, ...updated };
       setUserState(newUser);
       await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(newUser));
+      // Also update the users registry
+      const raw = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
+      const registry: Record<string, User> = raw ? JSON.parse(raw) : {};
+      registry[newUser.id] = newUser;
+      await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(registry));
     },
     [user]
   );
@@ -199,6 +219,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         signOut,
         registerCredentials,
         validateCredentials,
+        getUserById,
         updateUser,
         changePassword,
       }}

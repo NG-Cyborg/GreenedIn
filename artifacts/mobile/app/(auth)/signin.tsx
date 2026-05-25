@@ -13,7 +13,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useApp } from "@/context/AppContext";
 import { t } from "@/constants/i18n";
@@ -33,7 +32,7 @@ export default function SignIn() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { language, setUser, validateCredentials } = useApp();
+  const { language, setUser, validateCredentials, getUserById } = useApp();
 
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -48,6 +47,7 @@ export default function SignIn() {
     setLoading(true);
     setError("");
 
+    // Step 1: validate credentials → get userId
     const userId = await validateCredentials(phone, countryCode, password);
     if (!userId) {
       setError("Incorrect phone number or password. Please try again.");
@@ -55,18 +55,17 @@ export default function SignIn() {
       return;
     }
 
-    const storedUser = await AsyncStorage.getItem("@greenedin_user");
-    if (storedUser) {
-      const parsed = JSON.parse(storedUser);
-      if (parsed.id === userId) {
-        await setUser(parsed);
-        router.replace("/(tabs)");
-        setLoading(false);
-        return;
-      }
+    // Step 2: look up the user profile from the persistent users registry
+    const storedUser = await getUserById(userId);
+    if (!storedUser) {
+      setError("Account data not found. Please sign up again.");
+      setLoading(false);
+      return;
     }
 
-    setError("Account not found. Please sign up first.");
+    // Step 3: restore the session
+    await setUser(storedUser);
+    router.replace("/(tabs)");
     setLoading(false);
   };
 

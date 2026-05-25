@@ -1,8 +1,11 @@
 import { Feather } from "@expo/vector-icons";
+import * as FileSystemModule from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -11,6 +14,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,6 +24,12 @@ import { useEnterprise } from "@/context/EnterpriseContext";
 import type { WorksheetEntry } from "@/context/EnterpriseContext";
 import { t } from "@/constants/i18n";
 import { useColors } from "@/hooks/useColors";
+
+const FileSystem = FileSystemModule as typeof FileSystemModule & {
+  documentDirectory: string | null;
+  writeAsStringAsync: (uri: string, contents: string, options?: { encoding?: string }) => Promise<void>;
+  EncodingType: { UTF8: string };
+};
 
 function formatDate(isoString: string): string {
   const d = new Date(isoString);
@@ -31,6 +41,45 @@ function formatDate(isoString: string): string {
 
 function todayISO(): string {
   return new Date().toISOString().split("T")[0];
+}
+
+function buildCSV(enterprise: ReturnType<typeof useEnterprise>["enterprises"][number]): string {
+  const rows = ["Date,Description,Type,Amount (NGN)"];
+  for (const e of enterprise.entries) {
+    rows.push(`"${e.date}","${e.description}","${e.type}","${e.amount}"`);
+  }
+  return rows.join("\n");
+}
+
+function buildXLS(enterprise: ReturnType<typeof useEnterprise>["enterprises"][number]): string {
+  const escape = (s: string | number) =>
+    String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const headerCells = ["Date", "Description", "Type", "Amount (NGN)"]
+    .map((h) => `<Cell><Data ss:Type="String">${escape(h)}</Data></Cell>`)
+    .join("");
+
+  const dataRows = enterprise.entries
+    .map((e) => {
+      const cells = [e.date, e.description, e.type, e.amount]
+        .map((v, i) =>
+          `<Cell><Data ss:Type="${i === 3 ? "Number" : "String"}">${escape(v)}</Data></Cell>`
+        )
+        .join("");
+      return `<Row>${cells}</Row>`;
+    })
+    .join("\n");
+
+  return `<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="${escape(enterprise.name)}">
+  <Table>
+   <Row>${headerCells}</Row>
+   ${dataRows}
+  </Table>
+ </Worksheet>
+</Workbook>`;
 }
 
 export default function EnterpriseDetail() {
@@ -49,6 +98,8 @@ export default function EnterpriseDetail() {
   const [entryAmount, setEntryAmount] = useState("");
   const [entryDate, setEntryDate] = useState(todayISO());
   const [saving, setSaving] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   if (!enterprise) {
     return (
@@ -103,10 +154,55 @@ export default function EnterpriseDetail() {
     ]);
   };
 
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const doExport = async (format: "csv" | "xls") => {
+    if (enterprise.entries.length === 0) {
+      Alert.alert("No Entries", "Add revenue or expense entries before exporting.");
+      setShowExportMenu(false);
+      return;
+    }
+    setShowExportMenu(false);
+    setExporting(true);
+
+    try {
+      const fileName = `${enterprise.name.replace(/[^a-z0-9]/gi, "_")}.${format}`;
+      const content = format === "csv" ? buildCSV(enterprise) : buildXLS(enterprise);
+      const mimeType = format === "csv" ? "text/csv" : "application/vnd.ms-excel";
+
+      if (Platform.OS === "web") {
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const fileUri = (FileSystem.documentDirectory ?? "") + fileName;
+        await FileSystem.writeAsStringAsync(fileUri, content, {
+          encoding: FileSystem.EncodingType?.UTF8 ?? "utf8",
+        });
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType,
+            dialogTitle: `Export ${enterprise.name}`,
+          });
+        } else {
+          Alert.alert("Exported", `Saved to: ${fileUri}`);
+        }
+      }
+    } catch {
+      Alert.alert("Export Failed", "Could not export data. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const topPad = Platform.OS === "web" ? 0 : insets.top;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
+      {/* ── Header ── */}
       <View
         style={[
           styles.header,
@@ -128,15 +224,69 @@ export default function EnterpriseDetail() {
             Created {formatDate(enterprise.createdAt)} · {enterprise.numberOfUnits} units
           </Text>
         </View>
-        <TouchableOpacity
-          style={[styles.addEntryBtn, { backgroundColor: colors.primary }]}
-          onPress={() => setAddModalVisible(true)}
-          activeOpacity={0.85}
-        >
-          <Feather name="plus" size={16} color={colors.primaryForeground} />
-        </TouchableOpacity>
+
+        {/* 3-dot export menu */}
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[styles.iconBtn, { backgroundColor: colors.secondary }]}
+            onPress={() => setShowExportMenu((v) => !v)}
+            activeOpacity={0.8}
+          >
+            <Feather name="more-vertical" size={18} color={colors.foreground} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.iconBtn, { backgroundColor: colors.primary }]}
+            onPress={() => setAddModalVisible(true)}
+            activeOpacity={0.85}
+          >
+            <Feather name="plus" size={18} color={colors.primaryForeground} />
+          </TouchableOpacity>
+        </View>
       </View>
 
+      {/* ── Export dropdown ── */}
+      {showExportMenu && (
+        <>
+          <TouchableWithoutFeedback onPress={() => setShowExportMenu(false)}>
+            <View style={styles.exportOverlay} />
+          </TouchableWithoutFeedback>
+          <View
+            style={[
+              styles.exportMenu,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <TouchableOpacity
+              style={[styles.exportMenuItem, { borderBottomColor: colors.border }]}
+              onPress={() => doExport("csv")}
+              activeOpacity={0.7}
+            >
+              <Feather name="file-text" size={15} color={colors.primary} />
+              <Text style={[styles.exportMenuText, { color: colors.foreground }]}>
+                Export as CSV
+              </Text>
+              <Text style={[styles.exportMenuSub, { color: colors.mutedForeground }]}>
+                Google Sheets, Numbers
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.exportMenuItem}
+              onPress={() => doExport("xls")}
+              activeOpacity={0.7}
+            >
+              <Feather name="grid" size={15} color="#1D6F42" />
+              <Text style={[styles.exportMenuText, { color: colors.foreground }]}>
+                Export as XLS
+              </Text>
+              <Text style={[styles.exportMenuSub, { color: colors.mutedForeground }]}>
+                Microsoft Excel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+
+      {/* ── Cost banner ── */}
       <View style={[styles.costBanner, { backgroundColor: colors.primary }]}>
         <View>
           <Text style={styles.costBannerLabel}>{unitLabel}</Text>
@@ -147,12 +297,18 @@ export default function EnterpriseDetail() {
         <View style={styles.costBannerDivider} />
         <View>
           <Text style={styles.costBannerLabel}>Net</Text>
-          <Text style={[styles.costBannerValue, { color: totalRevenue - totalExpenses >= 0 ? "#A8E89C" : "#FF8A80" }]}>
+          <Text
+            style={[
+              styles.costBannerValue,
+              { color: totalRevenue - totalExpenses >= 0 ? "#A8E89C" : "#FF8A80" },
+            ]}
+          >
             ₦{(totalRevenue - totalExpenses).toLocaleString()}
           </Text>
         </View>
       </View>
 
+      {/* ── Entries list ── */}
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
@@ -160,6 +316,7 @@ export default function EnterpriseDetail() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Revenue section */}
         <View style={styles.worksheetSection}>
           <View style={styles.worksheetHeader}>
             <Feather name="arrow-up-circle" size={16} color="#22A55A" />
@@ -172,7 +329,6 @@ export default function EnterpriseDetail() {
               <Feather name="plus-circle" size={18} color="#22A55A" />
             </TouchableOpacity>
           </View>
-
           {revenues.length === 0 ? (
             <Text style={[styles.emptyRow, { color: colors.mutedForeground }]}>
               No revenue entries yet
@@ -197,6 +353,7 @@ export default function EnterpriseDetail() {
           )}
         </View>
 
+        {/* Expense section */}
         <View style={styles.worksheetSection}>
           <View style={styles.worksheetHeader}>
             <Feather name="arrow-down-circle" size={16} color="#E53935" />
@@ -209,7 +366,6 @@ export default function EnterpriseDetail() {
               <Feather name="plus-circle" size={18} color="#E53935" />
             </TouchableOpacity>
           </View>
-
           {expenses.length === 0 ? (
             <Text style={[styles.emptyRow, { color: colors.mutedForeground }]}>
               No expense entries yet
@@ -235,6 +391,7 @@ export default function EnterpriseDetail() {
         </View>
       </ScrollView>
 
+      {/* ── Totals bar ── */}
       <View
         style={[
           styles.totalsBar,
@@ -264,22 +421,24 @@ export default function EnterpriseDetail() {
         </View>
       </View>
 
+      {/* ── Add Entry Modal — properly keyboard-aware ── */}
       <Modal
         visible={addModalVisible}
         transparent
         animationType="slide"
         onRequestClose={() => setAddModalVisible(false)}
       >
-        <TouchableOpacity
-          style={styles.backdrop}
-          activeOpacity={1}
-          onPress={() => setAddModalVisible(false)}
-        />
         <KeyboardAvoidingView
+          style={styles.modalRoot}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.modalOuter}
         >
-          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+          {/* Backdrop tap-to-dismiss */}
+          <TouchableWithoutFeedback onPress={() => setAddModalVisible(false)}>
+            <View style={styles.backdrop} />
+          </TouchableWithoutFeedback>
+
+          {/* Sheet */}
+          <View style={[styles.modal, { backgroundColor: colors.background, paddingBottom: Platform.OS === "ios" ? insets.bottom + 16 : 24 }]}>
             <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.foreground }]}>
@@ -290,6 +449,7 @@ export default function EnterpriseDetail() {
               </TouchableOpacity>
             </View>
 
+            {/* Type toggle */}
             <View style={styles.typeToggle}>
               {(["expense", "revenue"] as const).map((type) => (
                 <TouchableOpacity
@@ -299,9 +459,7 @@ export default function EnterpriseDetail() {
                     {
                       backgroundColor:
                         entryType === type
-                          ? type === "revenue"
-                            ? "#22A55A"
-                            : "#E53935"
+                          ? type === "revenue" ? "#22A55A" : "#E53935"
                           : colors.secondary,
                     },
                   ]}
@@ -311,9 +469,7 @@ export default function EnterpriseDetail() {
                   <Text
                     style={[
                       styles.typeBtnText,
-                      {
-                        color: entryType === type ? "#FFFFFF" : colors.mutedForeground,
-                      },
+                      { color: entryType === type ? "#FFFFFF" : colors.mutedForeground },
                     ]}
                   >
                     {type === "revenue" ? t(language, "revenue") : t(language, "expenses")}
@@ -322,53 +478,69 @@ export default function EnterpriseDetail() {
               ))}
             </View>
 
-            <View style={styles.modalForm}>
-              <TextInput
-                style={[styles.modalInput, { borderColor: colors.border, backgroundColor: colors.card, color: colors.foreground }]}
-                value={entryDate}
-                onChangeText={setEntryDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.mutedForeground}
-              />
-              <TextInput
-                style={[styles.modalInput, { borderColor: colors.border, backgroundColor: colors.card, color: colors.foreground }]}
-                value={entryDesc}
-                onChangeText={setEntryDesc}
-                placeholder={t(language, "description")}
-                placeholderTextColor={colors.mutedForeground}
-              />
-              <TextInput
-                style={[styles.modalInput, { borderColor: colors.border, backgroundColor: colors.card, color: colors.foreground }]}
-                value={entryAmount}
-                onChangeText={setEntryAmount}
-                placeholder={t(language, "amount")}
-                placeholderTextColor={colors.mutedForeground}
-                keyboardType="decimal-pad"
-              />
-              <TouchableOpacity
-                style={[
-                  styles.saveBtn,
-                  {
-                    backgroundColor:
-                      !entryDesc || !entryAmount ? colors.muted : colors.primary,
-                  },
-                ]}
-                onPress={handleAddEntry}
-                disabled={!entryDesc || !entryAmount || saving}
-                activeOpacity={0.85}
-              >
-                <Text
+            {/* Form fields */}
+            <ScrollView
+              style={styles.modalScroll}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.modalForm}>
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Date</Text>
+                  <TextInput
+                    style={[styles.modalInput, { borderColor: colors.border, backgroundColor: colors.card, color: colors.foreground }]}
+                    value={entryDate}
+                    onChangeText={setEntryDate}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.mutedForeground}
+                    returnKeyType="next"
+                  />
+                </View>
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Description</Text>
+                  <TextInput
+                    style={[styles.modalInput, { borderColor: colors.border, backgroundColor: colors.card, color: colors.foreground }]}
+                    value={entryDesc}
+                    onChangeText={setEntryDesc}
+                    placeholder={t(language, "description")}
+                    placeholderTextColor={colors.mutedForeground}
+                    returnKeyType="next"
+                    autoFocus={false}
+                  />
+                </View>
+                <View style={styles.inputGroup}>
+                  <Text style={[styles.inputLabel, { color: colors.mutedForeground }]}>Amount (NGN)</Text>
+                  <TextInput
+                    style={[styles.modalInput, { borderColor: colors.border, backgroundColor: colors.card, color: colors.foreground }]}
+                    value={entryAmount}
+                    onChangeText={setEntryAmount}
+                    placeholder={t(language, "amount")}
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="decimal-pad"
+                    returnKeyType="done"
+                    onSubmitEditing={handleAddEntry}
+                  />
+                </View>
+                <TouchableOpacity
                   style={[
-                    styles.saveBtnText,
-                    {
-                      color: !entryDesc || !entryAmount ? colors.mutedForeground : colors.primaryForeground,
-                    },
+                    styles.saveBtn,
+                    { backgroundColor: !entryDesc || !entryAmount ? colors.muted : colors.primary },
                   ]}
+                  onPress={handleAddEntry}
+                  disabled={!entryDesc || !entryAmount || saving}
+                  activeOpacity={0.85}
                 >
-                  {saving ? "Saving..." : t(language, "addEntry")}
-                </Text>
-              </TouchableOpacity>
-            </View>
+                  <Text
+                    style={[
+                      styles.saveBtnText,
+                      { color: !entryDesc || !entryAmount ? colors.mutedForeground : colors.primaryForeground },
+                    ]}
+                  >
+                    {saving ? "Saving..." : t(language, "addEntry")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -429,12 +601,57 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: "Geist_400Regular",
   },
-  addEntryBtn: {
+  headerActions: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  iconBtn: {
     width: 36,
     height: 36,
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
+  },
+  exportOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+  },
+  exportMenu: {
+    position: "absolute",
+    top: 90,
+    right: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    zIndex: 20,
+    overflow: "hidden",
+    minWidth: 220,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  exportMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  exportMenuText: {
+    fontSize: 14,
+    fontFamily: "Geist_500Medium",
+    flex: 1,
+  },
+  exportMenuSub: {
+    fontSize: 11,
+    fontFamily: "Geist_400Regular",
   },
   costBanner: {
     flexDirection: "row",
@@ -463,7 +680,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: 16,
-    gap: 20,
   },
   worksheetSection: {
     marginBottom: 24,
@@ -521,7 +737,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     paddingTop: 14,
     paddingHorizontal: 24,
-    gap: 0,
   },
   totalItem: {
     flex: 1,
@@ -542,20 +757,18 @@ const styles = StyleSheet.create({
     width: 1,
     marginHorizontal: 16,
   },
+  // Modal
+  modalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  modalOuter: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
   },
   modal: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingBottom: 40,
   },
   modalHandle: {
     width: 36,
@@ -581,7 +794,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
     paddingHorizontal: 24,
-    marginBottom: 16,
+    marginBottom: 4,
   },
   typeBtn: {
     flex: 1,
@@ -593,15 +806,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "Geist_600SemiBold",
   },
+  modalScroll: {
+    flexShrink: 1,
+  },
   modalForm: {
     paddingHorizontal: 24,
-    gap: 12,
+    paddingTop: 12,
+    gap: 14,
+    paddingBottom: 8,
+  },
+  inputGroup: {
+    gap: 6,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontFamily: "Geist_500Medium",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   modalInput: {
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
     fontSize: 15,
     fontFamily: "Geist_400Regular",
   },
