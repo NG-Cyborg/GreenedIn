@@ -1,16 +1,7 @@
 import { Feather } from "@expo/vector-icons";
-import * as FileSystemModule from "expo-file-system";
-import * as Sharing from "expo-sharing";
-
-const FileSystem = FileSystemModule as typeof FileSystemModule & {
-  documentDirectory: string | null;
-  writeAsStringAsync: (uri: string, contents: string, options?: { encoding?: string }) => Promise<void>;
-  EncodingType: { UTF8: string };
-};
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -28,23 +19,6 @@ import { EnterpriseCard } from "@/components/EnterpriseCard";
 import { AddEnterpriseModal } from "@/components/AddEnterpriseModal";
 import { OfflineBanner } from "@/components/OfflineBanner";
 
-function buildCSV(enterprises: ReturnType<typeof useEnterprise>["enterprises"]): string {
-  const rows: string[] = [];
-  rows.push("Enterprise Name,Type,Units,Created,Date,Description,Type,Amount (NGN)");
-  for (const e of enterprises) {
-    if (e.entries.length === 0) {
-      rows.push(`"${e.name}","${e.type}","${e.numberOfUnits}","${e.createdAt.split("T")[0]}","","","",""`);
-    } else {
-      for (const entry of e.entries) {
-        rows.push(
-          `"${e.name}","${e.type}","${e.numberOfUnits}","${e.createdAt.split("T")[0]}","${entry.date}","${entry.description}","${entry.type}","${entry.amount}"`
-        );
-      }
-    }
-  }
-  return rows.join("\n");
-}
-
 export default function TrackScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -52,48 +26,8 @@ export default function TrackScreen() {
   const { language } = useApp();
   const { enterprises } = useEnterprise();
   const [showModal, setShowModal] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
-
-  const handleExport = async () => {
-    if (enterprises.length === 0) {
-      Alert.alert("No Data", "Add enterprises and entries before exporting.");
-      return;
-    }
-    setExporting(true);
-    try {
-      const csv = buildCSV(enterprises);
-      if (Platform.OS === "web") {
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "GreenedIn_Enterprises.csv";
-        a.click();
-        URL.revokeObjectURL(url);
-      } else {
-        const fileUri = FileSystem.documentDirectory + "GreenedIn_Enterprises.csv";
-        await FileSystem.writeAsStringAsync(fileUri, csv, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
-        const canShare = await Sharing.isAvailableAsync();
-        if (canShare) {
-          await Sharing.shareAsync(fileUri, {
-            mimeType: "text/csv",
-            dialogTitle: "Export Enterprise Data",
-            UTI: "public.comma-separated-values-text",
-          });
-        } else {
-          Alert.alert("Exported", `File saved to: ${fileUri}`);
-        }
-      }
-    } catch {
-      Alert.alert("Export Failed", "Could not export data. Please try again.");
-    } finally {
-      setExporting(false);
-    }
-  };
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -111,31 +45,16 @@ export default function TrackScreen() {
         <Text style={[styles.title, { color: colors.foreground }]}>
           {t(language, "track")}
         </Text>
-        <View style={styles.headerBtns}>
-          {enterprises.length > 0 && (
-            <TouchableOpacity
-              style={[styles.exportBtn, { backgroundColor: colors.secondary, borderColor: colors.border }]}
-              onPress={handleExport}
-              disabled={exporting}
-              activeOpacity={0.85}
-            >
-              <Feather name="download" size={14} color={colors.primary} />
-              <Text style={[styles.exportBtnText, { color: colors.primary }]}>
-                {exporting ? "..." : "CSV"}
-              </Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.addBtn, { backgroundColor: colors.primary }]}
-            onPress={() => setShowModal(true)}
-            activeOpacity={0.85}
-          >
-            <Feather name="plus" size={16} color={colors.primaryForeground} />
-            <Text style={[styles.addBtnText, { color: colors.primaryForeground }]}>
-              {t(language, "addNew")}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={[styles.addBtn, { backgroundColor: colors.primary }]}
+          onPress={() => setShowModal(true)}
+          activeOpacity={0.85}
+        >
+          <Feather name="plus" size={16} color={colors.primaryForeground} />
+          <Text style={[styles.addBtnText, { color: colors.primaryForeground }]}>
+            {t(language, "addNew")}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -166,13 +85,21 @@ export default function TrackScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          enterprises.map((e) => (
-            <EnterpriseCard
-              key={e.id}
-              enterprise={e}
-              onPress={() => router.push(`/enterprise/${e.id}`)}
-            />
-          ))
+          <>
+            <View style={[styles.exportHint, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+              <Feather name="info" size={13} color={colors.mutedForeground} />
+              <Text style={[styles.exportHintText, { color: colors.mutedForeground }]}>
+                Open an enterprise and tap the 3-dot menu to export as CSV or XLS.
+              </Text>
+            </View>
+            {enterprises.map((e) => (
+              <EnterpriseCard
+                key={e.id}
+                enterprise={e}
+                onPress={() => router.push(`/enterprise/${e.id}`)}
+              />
+            ))}
+          </>
         )}
       </ScrollView>
 
@@ -202,24 +129,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontFamily: "Lora_700Bold",
   },
-  headerBtns: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  exportBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-  },
-  exportBtnText: {
-    fontSize: 12,
-    fontFamily: "Geist_600SemiBold",
-  },
   addBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -235,7 +144,22 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: {
     padding: 16,
-    gap: 2,
+    gap: 10,
+  },
+  exportHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 11,
+    marginBottom: 4,
+  },
+  exportHintText: {
+    fontSize: 12,
+    fontFamily: "Geist_400Regular",
+    flex: 1,
+    lineHeight: 17,
   },
   empty: {
     alignItems: "center",
