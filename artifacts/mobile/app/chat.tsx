@@ -82,9 +82,7 @@ export default function ChatScreen() {
     ];
 
     try {
-      const domain = process.env.EXPO_PUBLIC_DOMAIN;
-      const baseUrl = domain ? `https://${domain}` : "";
-      const resp = await fetch(`${baseUrl}/api/ai/chat`, {
+      const resp = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
